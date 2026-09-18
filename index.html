@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pagebound Hero</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #DBD5C9;
+    overflow: hidden;
+  }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var WORD  = "PAGEBOUND";
+  var COUNT = 4000;
+
+  var PAPER = new THREE.Color(0xdbd5c9);
+  var INK   = new THREE.Color(0x2e2a26);
+  var RED   = new THREE.Color(0x7a3236);
+  var GOLD  = new THREE.Color(0xb08d3f);
+
+  var stage = document.getElementById("stage");
+
+  var scene = new THREE.Scene();
+  scene.background = PAPER.clone();
+
+  var camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
+  camera.position.z = 10;
+
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  stage.appendChild(renderer.domElement);
+
+  function glyphTexture() {
+    var s = 64;
+    var c = document.createElement("canvas");
+    c.width = c.height = s;
+    var g = c.getContext("2d");
+    g.clearRect(0, 0, s, s);
+    g.fillStyle = "#ffffff";
+    g.font = "bold 46px ui-monospace, Menlo, Consolas, monospace";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("m", s / 2, s / 2 + 2);
+    var t = new THREE.CanvasTexture(c);
+    t.minFilter = THREE.LinearFilter;
+    return t;
+  }
+
+  var material = new THREE.PointsMaterial({
+    size: 7,
+    map: glyphTexture(),
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    sizeAttenuation: false
+  });
+
+  var geometry  = new THREE.BufferGeometry();
+  var positions = new Float32Array(COUNT * 3);
+  var colors    = new Float32Array(COUNT * 3);
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color",    new THREE.BufferAttribute(colors, 3));
+  scene.add(new THREE.Points(geometry, material));
+
+  var P = [];
+  for (var i = 0; i < COUNT; i++) {
+    var t = Math.random();
+    P.push({
+      tx: 0, ty: 0,
+      inWord: false,
+      h: Math.pow(Math.random(), 0.8),
+      a0: Math.random() * Math.PI * 2,
+      spin: 1.6 + Math.random() * 2.4,
+      lag: Math.random() * 0.30,
+      tint: t < 0.05 ? RED : (t < 0.085 ? GOLD : INK),
+      dim: 0.55 + Math.random() * 0.45
+    });
+  }
+
+  var W = 0, H = 0, FUNNEL_TOP = 0, FUNNEL_BOT = 0, RTOP = 0;
+
+  function buildTargets() {
+    var c  = document.createElement("canvas");
+    var cw = Math.max(240, Math.min(1400, Math.floor(W)));
+    var ch = Math.max(60, Math.floor(cw * 0.22));
+    c.width = cw; c.height = ch;
+
+    var g = c.getContext("2d");
+    g.fillStyle = "#000"; g.fillRect(0, 0, cw, ch);
+    g.fillStyle = "#fff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+
+    var size = ch;
+    g.font = "900 " + size + "px Helvetica, Arial, sans-serif";
+    size = size * (cw * 0.88) / g.measureText(WORD).width;
+    if (size > ch * 0.86) size = ch * 0.86;
+    g.font = "900 " + size + "px Helvetica, Arial, sans-serif";
+    g.fillText(WORD, cw / 2, ch / 2);
+
+    var data = g.getImageData(0, 0, cw, ch).data;
+    var lit = [];
+    for (var y = 0; y < ch; y += 2) {
+      for (var x = 0; x < cw; x += 2) {
+        if (data[(y * cw + x) * 4] > 120) lit.push([x, y]);
+      }
+    }
+    if (!lit.length) return;
+
+    var originY = H * 0.04;
+    for (var i = 0; i < COUNT; i++) {
+      var p = P[i];
+      if (i < COUNT * 0.62) {
+        var pick = lit[(Math.random() * lit.length) | 0];
+        p.inWord = true;
+        p.tx = (pick[0] - cw / 2) * (W / cw);
+        p.ty = originY - (pick[1] - ch / 2) * (W / cw);
+      } else {
+        p.inWord = false;
+      }
+    }
+  }
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    renderer.setSize(W, H, false);
+    camera.left = -W / 2; camera.right  = W / 2;
+    camera.top  =  H / 2; camera.bottom = -H / 2;
+    camera.updateProjectionMatrix();
+
+    material.size = Math.max(4, Math.min(9, W / 130));
+
+    FUNNEL_BOT = -H * 0.46;
+    FUNNEL_TOP =  H * 0.46;
+    RTOP = W * 0.42;
+
+    buildTargets();
+  }
+
+  var tmp = { x: 0, y: 0 };
+  function funnelPos(p, time, squeeze) {
+    var R = (6 + (RTOP - 6) * Math.pow(p.h, 1.45)) * squeeze;
+    var a = p.a0 + time * p.spin / (0.28 + p.h);
+    tmp.x = Math.cos(a) * R;
+    tmp.y = FUNNEL_BOT + p.h * (FUNNEL_TOP - FUNNEL_BOT) + Math.sin(a) * R * 0.28;
+  }
+
+  var CYCLE = 9.0;
+  var start = performance.now();
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function frame(now) {
+    var el  = (now - start) / 1000;
+    var cyc = (el % CYCLE) / CYCLE;
+    var spinTime = el * 0.9;
+
+    var form;
+    if (cyc < 0.55)      form = 0;
+    else if (cyc < 0.78) form = easeOut((cyc - 0.55) / 0.23);
+    else if (cyc < 0.90) form = 1;
+    else                 form = 1 - easeOut((cyc - 0.90) / 0.10);
+
+    var squeeze = 1 - 0.55 * form;
+    var wind = -W * 1.4 * Math.pow(Math.max(0, 0.20 - cyc) / 0.20, 2);
+
+    var pos = geometry.attributes.position.array;
+    var col = geometry.attributes.color.array;
+
+    for (var i = 0; i < COUNT; i++) {
+      var p = P[i];
+      funnelPos(p, spinTime, squeeze);
+
+      var x = tmp.x + wind;
+      var y = tmp.y;
+      var alpha;
+
+      if (p.inWord) {
+        var f = easeOut(Math.max(0, Math.min(1, (form - p.lag) / (1 - p.lag + 1e-6))));
+        x += (p.tx - x) * f;
+        y += (p.ty - y) * f;
+        alpha = p.dim * (0.40 + 0.60 * f);
+      } else {
+        alpha = p.dim * 0.42 * (1 - form * 0.88);
+      }
+
+      var j = i * 3;
+      pos[j]     = x;
+      pos[j + 1] = y;
+      pos[j + 2] = 0;
+      col[j]     = PAPER.r + (p.tint.r - PAPER.r) * alpha;
+      col[j + 1] = PAPER.g + (p.tint.g - PAPER.g) * alpha;
+      col[j + 2] = PAPER.b + (p.tint.b - PAPER.b) * alpha;
+    }
+
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  var rt;
+  window.addEventListener("resize", function () {
+    clearTimeout(rt);
+    rt = setTimeout(resize, 150);
+  });
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
