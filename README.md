@@ -1,0 +1,2 @@
+# adalo-welcome
+welcome animation
