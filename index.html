@@ -9,7 +9,7 @@
     margin: 0;
     padding: 0;
     height: 100%;
-    background: #DBD5C9;
+    background: #DBD5C9;     /* ivory paper, matches the Welcome screen */
     overflow: hidden;
   }
   #stage { position: fixed; inset: 0; }
@@ -24,6 +24,13 @@
 (function () {
   "use strict";
 
+  /* ------------------------------------------------------------------
+     PAGEBOUND — ink particles blow in from the left, spiral into a
+     tornado, then collapse into the wordmark. Ink on paper, so the
+     palette matches the Welcome screen it sits above.
+     Drop this file on Vercel as index.html. No other files needed.
+  -------------------------------------------------------------------*/
+
   var WORD  = "PAGEBOUND";
   var COUNT = 4000;
 
@@ -34,7 +41,7 @@
 
   var stage = document.getElementById("stage");
 
-  var scene = new THREE.Scene();
+  var scene  = new THREE.Scene();
   scene.background = PAPER.clone();
 
   var camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
@@ -44,6 +51,7 @@
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   stage.appendChild(renderer.domElement);
 
+  /* glyph sprite: white letter on transparent, tinted per particle */
   function glyphTexture() {
     var s = 64;
     var c = document.createElement("canvas");
@@ -74,7 +82,9 @@
   var colors    = new Float32Array(COUNT * 3);
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("color",    new THREE.BufferAttribute(colors, 3));
-  scene.add(new THREE.Points(geometry, material));
+  var points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;   // positions change every frame; never cull
+  scene.add(points);
 
   var P = [];
   for (var i = 0; i < COUNT; i++) {
@@ -138,7 +148,7 @@
   function resize() {
     W = window.innerWidth;
     H = window.innerHeight;
-    renderer.setSize(W, H, false);
+    renderer.setSize(W, H);          // must update CSS size too
     camera.left = -W / 2; camera.right  = W / 2;
     camera.top  =  H / 2; camera.bottom = -H / 2;
     camera.updateProjectionMatrix();
@@ -163,20 +173,24 @@
   var CYCLE = 9.0;
   var start = performance.now();
   function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+  function easeInOut(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 
   function frame(now) {
     var el  = (now - start) / 1000;
     var cyc = (el % CYCLE) / CYCLE;
     var spinTime = el * 0.9;
 
+    /* opens ON the wordmark, dissolves into the tornado, reforms, repeats.
+       Never goes empty, so a short hero strip always has something in it. */
     var form;
-    if (cyc < 0.55)      form = 0;
-    else if (cyc < 0.78) form = easeOut((cyc - 0.55) / 0.23);
-    else if (cyc < 0.90) form = 1;
-    else                 form = 1 - easeOut((cyc - 0.90) / 0.10);
+    if (cyc < 0.26)      form = 1;
+    else if (cyc < 0.46) form = 1 - easeInOut((cyc - 0.26) / 0.20);
+    else if (cyc < 0.58) form = 0;
+    else if (cyc < 0.82) form = easeInOut((cyc - 0.58) / 0.24);
+    else                 form = 1;
 
     var squeeze = 1 - 0.55 * form;
-    var wind = -W * 1.4 * Math.pow(Math.max(0, 0.20 - cyc) / 0.20, 2);
+    var wind = Math.sin(el * 0.35) * W * 0.02 * (1 - form);   // a slow lateral drift
 
     var pos = geometry.attributes.position.array;
     var col = geometry.attributes.color.array;
@@ -198,6 +212,7 @@
         alpha = p.dim * 0.42 * (1 - form * 0.88);
       }
 
+      // dark marks on light paper: fade by mixing toward the paper colour
       var j = i * 3;
       pos[j]     = x;
       pos[j + 1] = y;
